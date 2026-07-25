@@ -1,0 +1,20 @@
+[
+  {
+    "id": "1784837806480",
+    "name": "book",
+    "price": 2000,
+    "size": "small"
+  },
+  {
+    "id": "1784837888029",
+    "name": "shirts",
+    "price": 3000,
+    "size": "large"
+  },
+  {
+    "id": "1785010706549",
+    "name": "pants",
+    "price": 4000,
+    "size": "medium"
+  }
+]
