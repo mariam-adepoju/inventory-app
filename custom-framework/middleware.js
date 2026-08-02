@@ -15,6 +15,11 @@ function jsonParser() {
                     next(parseError);
                 }
             });
+            req.on("aborted", () => {
+                const err = new Error("Request aborted");
+                err.status = 400;
+                next(err);
+            });
         } else {
             next();
         }

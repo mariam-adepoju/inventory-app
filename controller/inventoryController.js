@@ -1,14 +1,25 @@
 const path = require('path');
+const crypto = require("crypto");
 const { readData, writeData } = require('../utils/storage');
-const { validateItemPayload, normalizeSize } = require('../utils/validator');
+const { validateItemPayload } = require('../utils/validator');
 
 const DATA_FILE = path.join(__dirname, '..', 'db', 'items.json');
+
+function findItemIndex(items, id) {
+    return items.findIndex(item => String(item.id) === String(id));
+}
+
+function generateId(length = 8) {
+    return crypto.randomBytes(Math.ceil(length / 2))
+        .toString("hex")
+        .slice(0, length);
+}
 
 const inventoryController = {
     async getAllItems(req, res, next) {
         try {
             const items = await readData(DATA_FILE);
-            return res.status(200).json({ success: true, count: items.length, data: items });
+            return res.json({ success: true, count: items.length, data: items });
         } catch (err) {
             next(err);
         }
@@ -17,13 +28,13 @@ const inventoryController = {
     async getItemById(req, res, next) {
         try {
             const items = await readData(DATA_FILE);
-            const item = items.find(i => i.id === req.params.id);
-            if (!item) {
+            const index = findItemIndex(items, req.params.id);
+            if (index === -1) {
                 const error = new Error('Item not found');
                 error.status = 404;
                 return next(error);
             }
-            return res.status(200).json({ success: true, data: item });
+            return res.json({ success: true, message: "Item retrieved successfully", data: items[index] });
         } catch (err) {
             next(err);
         }
@@ -31,63 +42,72 @@ const inventoryController = {
 
     async createItem(req, res, next) {
         try {
-            const validationErrors = validateItemPayload(req.body, false);
-            if (validationErrors.length > 0) {
-                const error = new Error(validationErrors.join(', '));
+            const validation = validateItemPayload(req.body, { partial: false });
+            if (!validation.valid) {
+                const error = new Error(validation.errors.join(', '));
                 error.status = 400;
                 return next(error);
             }
 
             const items = await readData(DATA_FILE);
-            const newItem = {
-                id: Date.now().toString(),
-                name: req.body.name.trim(),
-                price: Number(req.body.price),
-                size: normalizeSize(req.body.size)
-            };
-
+            const newItem = { id: generateId(), ...validation.value };
             items.push(newItem);
             await writeData(DATA_FILE, items);
-
-            return res.status(201).json({ success: true, data: newItem });
+            return res.status(201).json({ success: true, message: "Item created successfully", data: newItem });
         } catch (err) {
             next(err);
         }
     },
 
-    async updateItem(req, res, next) {
+    // PUT: Strictly requires all fields and completely replaces the resource (except ID)
+    async replaceItem(req, res, next) {
         try {
-            const validationErrors = validateItemPayload(req.body, true);
-            if (validationErrors.length > 0) {
-                const error = new Error(validationErrors.join(', '));
+            const validation = validateItemPayload(req.body, { partial: false });
+            if (!validation.valid) {
+                const error = new Error(validation.errors.join(', '));
                 error.status = 400;
                 return next(error);
             }
 
             const items = await readData(DATA_FILE);
-
-            // Find index supporting both string and numeric IDs safely
-            const index = items.findIndex(i => String(i.id) === String(req.params.id));
+            const index = findItemIndex(items, req.params.id);
             if (index === -1) {
                 const error = new Error('Item not found');
                 error.status = 404;
                 return next(error);
             }
 
-            const current = items[index];
-
-            // Construct the updated item: merges provided fields or falls back to existing current fields
-            const updatedItem = {
-                id: current.id,
-                name: req.body.name !== undefined ? req.body.name.trim() : current.name,
-                price: req.body.price !== undefined ? Number(req.body.price) : current.price,
-                size: req.body.size !== undefined ? normalizeSize(req.body.size) : current.size
-            };
-
-            items[index] = updatedItem;
+            // Replace completely, retaining original ID
+            items[index] = { id: items[index].id, ...validation.value };
             await writeData(DATA_FILE, items);
+            return res.json({ success: true, message: "Item replaced successfully", data: items[index] });
+        } catch (err) {
+            next(err);
+        }
+    },
 
-            return res.status(200).json({ success: true, data: updatedItem });
+    // PATCH: Allows updating only specified/partial fields
+    async updateItem(req, res, next) {
+        try {
+            const validation = validateItemPayload(req.body, { partial: true });
+            if (!validation.valid) {
+                const error = new Error(validation.errors.join(', '));
+                error.status = 400;
+                return next(error);
+            }
+
+            const items = await readData(DATA_FILE);
+            const index = findItemIndex(items, req.params.id);
+            if (index === -1) {
+                const error = new Error('Item not found');
+                error.status = 404;
+                return next(error);
+            }
+
+            // Merge updated fields into existing item
+            items[index] = { ...items[index], ...validation.value };
+            await writeData(DATA_FILE, items);
+            return res.json({ success: true, message: "Item updated successfully", data: items[index] });
         } catch (err) {
             next(err);
         }
@@ -96,7 +116,7 @@ const inventoryController = {
     async deleteItem(req, res, next) {
         try {
             const items = await readData(DATA_FILE);
-            const index = items.findIndex(i => String(i.id) === String(req.params.id));
+            const index = findItemIndex(items, req.params.id);
 
             if (index === -1) {
                 const error = new Error('Item not found');
@@ -104,10 +124,9 @@ const inventoryController = {
                 return next(error);
             }
 
-            const deletedItem = items.splice(index, 1)[0];
+            const [deletedItem] = items.splice(index, 1);
             await writeData(DATA_FILE, items);
-
-            return res.status(200).json({ success: true, message: 'Item deleted successfully', data: deletedItem });
+            return res.json({ success: true, message: 'Item deleted successfully', data: deletedItem });
         } catch (err) {
             next(err);
         }
